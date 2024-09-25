@@ -1,0 +1,120 @@
+#!ipxe
+
+set menu-timeout 5000
+set submenu-timeout ${menu-timeout}
+set bucket http://storage.googleapis.com/licorice
+set memtest mt86plus_6.00b3_64.iso
+
+menu BI Lab iPXE Boot Menu, version: {{ version }}
+item --key l local Boot from local hdd
+item --key s ipxe-shell iPXE Shell
+item --key m memtest86+ memtest86+
+item --key n netboot.xyz netboot.xyz
+{%- for install_option in install_options %}
+item {{install_option["name"]}} {{install_option["description"]}}
+{%- endfor %}
+item --key j bil-jammy Install Ubuntu 22.04.1 LTS Jammy (BI Lab)
+item --key f bil-focal Install Ubuntu 20.04.5 LTS Focal (BI Lab)
+item --key b bil-bionic Install Ubuntu 18.04.6 LTS Bionic (BI Lab)
+item --key x bil-xenial Install Ubuntu 16.04.7 LTS Xenial (BI Lab)
+item --key p poweroff Shutdown
+choose --default {{ default_menu_item }} --timeout 10000 target && goto ${target}
+
+:local
+echo Booting from local disks ...
+exit 1
+# TODO figure out why exit 0 and sanboot don't work on UEFI:
+# https://forum.ipxe.org/showthread.php?tid=10915
+# sanboot --no-describe --drive 0x80
+
+:ipxe-shell
+shell
+
+:memtest86+
+iseq ${platform} efi && goto uefi_memtest || goto legacy_memtest
+
+    :uefi_memtest
+    chain --autofree ${bucket}/netboot/util/memtest86+.efi
+
+    :legacy_memtest
+    chain --autofree ${bucket}/netboot/util/memtest86+.bin
+
+:netboot.xyz
+iseq ${platform} efi && goto uefi_netboot || goto legacy_netboot
+
+    :uefi_netboot
+    chain --autofree http://boot.netboot.xyz/ipxe/netboot.xyz.efi
+
+    :legacy_netboot
+    chain --autofree http://boot.netboot.xyz
+
+{% for install_option in install_options %}
+:{{install_option["name"]}}
+
+{%- if install_option["efi"] %}
+
+    initrd  {{install_option["initrd_path"]}}
+    chain  {{install_option["vmlinuz_path"]}} initrd=initrd.magic ip=dhcp cloud-config-url=/dev/null url=https://releases.ubuntu.com/22.04.1/ubuntu-22.04.1-live-server-amd64.iso autoinstall ds=nocloud-net;s={{install_option["seedfrom"]}}
+
+{%- else %}
+
+    kernel {{install_option["kernel_path"]}}
+    initrd  {{install_option["initrd_path"]}}
+    imgargs linux auto=true url={{install_option["preseed_path"]}} netcfg/get_hostname=install
+    boot
+
+{%- endif %}
+
+{%- endfor %}
+
+:bil-jammy
+iseq ${platform} efi && goto uefi_jammy || goto legacy_jammy
+
+    :uefi_jammy
+    initrd  ${bucket}/autoinstall/uefi/ubuntu-jammy/initrd
+    chain  ${bucket}/autoinstall/uefi/ubuntu-jammy/vmlinuz initrd=initrd.magic ip=dhcp cloud-config-url=/dev/null url=https://releases.ubuntu.com/22.04.1/ubuntu-22.04.1-live-server-amd64.iso autoinstall ds=nocloud-net;s=${bucket}/autoinstall/uefi/ubuntu-jammy/
+
+
+    ## :legacy_jammy
+    ## initrd  ${bucket}/autoinstall/legacy/ubuuntu-jammy/initrd
+    ## chain  ${bucket}/autoinstall/legacy/ubuuntu-jammy/vmlinuz
+    :legacy_jammy
+    initrd=initrd.magic ip=dhcp cloud-config-url=/dev/null url=https://releases.ubuntu.com/22.04.1/ubuntu-22.04.1-live-server-amd64.iso autoinstall ds=nocloud-net;s=${bucket}/autoinstall/legacy/ubuuntu-jammy/
+
+
+:bil-focal
+iseq ${platform} efi && goto uefi_focal || goto legacy_focal
+
+    ## :uefi_focal
+    ## initrd  ${bucket}/autoinstall/uefi/ubuntu-focal/initrd
+    ## chain  ${bucket}/autoinstall/uefi/ubuntu-focal/vmlinuz
+    :uefi_focal
+    initrd=initrd.magic ip=dhcp cloud-config-url=/dev/null url=https://releases.ubuntu.com/20.04.5/ubuntu-20.04.5-live-server-amd64.iso autoinstall ds=nocloud-net;s=${bucket}/autoinstall/uefi/ubuntu-focal/
+
+
+    :legacy_focal
+    kernel ${bucket}/autoinstall/legacy/ubuntu-focal/linux
+    initrd  ${bucket}/autoinstall/legacy/ubuntu-focal/initrd.gz
+    imgargs linux auto=true url=${bucket}/autoinstall/legacy/ubuntu-focal/preseed.cfg netcfg/get_hostname=install
+    boot
+
+    #initrd  ${bucket}/autoinstall/legacy/ubuntu-focal/initrd
+    #chain  ${bucket}/autoinstall/legacy/ubuntu-focal/vmlinuz initrd=initrd.magic ip=dhcp cloud-config-url=/dev/null url=https://releases.ubuntu.com/20.04.5/ubuntu-20.04.5-live-server-amd64.iso autoinstall ds=nocloud-net;s=${bucket}/autoinstall/legacy/ubuntu-focal/
+
+:bil-bionic
+# assumes legacy only
+kernel ${bucket}/autoinstall/legacy/ubuntu-bionic/linux
+initrd  ${bucket}/autoinstall/legacy/ubuntu-bionic/initrd.gz
+imgargs linux auto=true netcfg/get_hostname=install url=${bucket}/autoinstall/legacy/ubuntu-bionic/preseed.cfg
+boot
+
+:bil-xenial
+# assumes legacy only
+kernel ${bucket}/autoinstall/legacy/ubuntu-xenial/linux
+initrd  ${bucket}/autoinstall/legacy/ubuntu-xenial/initrd.gz
+imgargs linux auto=true interface=auto netcfg/get_hostname=install url=${bucket}/autoinstall/legacy/ubuntu-xenial/preseed.cfg
+boot
+
+
+:poweroff
+poweroff

@@ -1,0 +1,5 @@
+#!ipxe
+
+dhcp
+
+chain http://provision.licorice.su.domains/menu{{query_params}}
